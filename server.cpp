@@ -16,6 +16,7 @@
 #include <sys/socket.h>
 #include <cstdint>
 #include <cstdio>
+#include <stdexcept>
 using namespace std;
 
 // ---- Constants ----
@@ -46,30 +47,75 @@ public:
     // Implement these functions:
     Stack()
     { // initialize the stack
-    }
-    void push(const T& val)
-    {
+        top = nullptr;
+        count = 0;
 
-        // pushes the value on the stack if max limit is not reached yet.
     }
+
+    ~Stack() {
+        while (top != nullptr) {
+            Node* temp = top;
+            top = top->next;
+            delete temp;
+        }
+    }
+
+    void push(const T& val)
+    {// pushes the value on the stack if max limit is not reached yet.
+        if (count == MAX_STACK_DEPTH) {
+            throw (overflow_error("Stack is FULL! Can't push more elements"));
+        }
+
+        Node* newnode = new Node;
+        newnode->data = val;
+        newnode->next = top;
+        top = newnode;
+        count++;
+    }
+
     T pop()
     {
+        if (top == nullptr) {
+            throw(underflow_error("Stack is empty, nothing can be popped"));
+            return T();
+        }
+        Node* temp = top;
+        T val = temp->data;
+        top = top->next;
+        delete temp;
+        count--;
+        return val;
         // pop the top value on the stack
+
     }
     T& peek()
     {
         // returns the top value on the stack
+        return top->data;
     }
     bool isEmpty()
     {
+        if (top == nullptr) {
+            return true;
+        }
+        return false;
     }
     int32_t depth()
     {
+        return count;
     }
     int32_t snapshot_into(T out[], int32_t maxLen)
     {
         // copies every frame, top to bottom in the array given as a parameter
         // this is what buildSnapshot() call, returns count written
+        int32_t idx = 0;
+        Node* current = top;
+        while (current != nullptr && idx < maxLen) {
+            out[idx] = current->data;
+            current = current->next;
+            idx++;
+        }
+        return idx;
     }
 };
 
@@ -242,6 +288,21 @@ void writeTdbg(Timeline& timeline, const char* tdbgPath)
 // main section
 int32_t main()
 {
+    Stack<int> s;
+    s.push(1);
+    s.push(2);
+    s.push(3);
+    cout << s.pop() << endl;
+    cout << s.pop() << endl;
+    cout << s.pop() << endl;
+    cout << s.isEmpty() << endl;
+    try {
+        s.pop();
+    }
+    catch (underflow_error& e) {
+        cout << "Caught: " << e.what() << endl;
+    }
+    return 0;
 
     if (!validateProgram("source.bin"))
     {

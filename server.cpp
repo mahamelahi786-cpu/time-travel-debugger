@@ -137,16 +137,40 @@ public:
     // Implement these functions
     Timeline()
     {
+        head = nullptr;
+        tail = nullptr;
+        stepCount = 0;
+
     }
+
+    ~Timeline();
+
     void record(Snapshot* s)
     {
         // add record in the timeline
+        TimelineNode* newnode = new TimelineNode;
+        newnode->data = s;
+        newnode->next = nullptr;
+        newnode->prev = tail;
+
+        if (head == nullptr) {
+            head = newnode;
+            tail = newnode;
+        }
+        else {
+            tail->next = newnode;
+            tail = newnode;
+        }
+        stepCount++;
     }
+
     TimelineNode* begin()
     {
+        return head;
     }
     int32_t getStepCount()
     {
+        return stepCount;
     }
 };
 
@@ -170,6 +194,17 @@ struct Snapshot
     Frame callStack[MAX_STACK_DEPTH];
     int32_t stackDepth;
 };
+
+Timeline::~Timeline() {
+    TimelineNode* current = head;
+    while(current != nullptr) {
+        TimelineNode* nextnode = current->next;
+        delete current->data;
+        delete current;
+        current = nextnode;
+    }
+}
+
 struct TTDBHeader
 {
     char magic[4]; // "TTDB"
@@ -302,6 +337,27 @@ int32_t main()
     catch (underflow_error& e) {
         cout << "Caught: " << e.what() << endl;
     }
+
+    Timeline t;
+    for (int i = 1; i <= 3; i++) {
+        Snapshot* snap = new Snapshot;
+        snap->stackDepth = i * 10;
+        t.record(snap);
+    }
+    cout << "steps = " << t.getStepCount() << endl;
+
+    TimelineNode* current = t.begin();
+    while (current->next != nullptr) {
+        cout << current->data->stackDepth << " ";
+        current = current->next;
+    }
+    cout << current->data->stackDepth << endl;
+    while (current != nullptr) {
+        cout << current->data->stackDepth << " ";
+        current = current->prev;
+    }
+    cout << endl;
+
     return 0;
 
     if (!validateProgram("source.bin"))

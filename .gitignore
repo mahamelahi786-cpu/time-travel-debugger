@@ -2,3 +2,5 @@ server
 *.o
 resolve.bin
 session.tdbg
+.vscode/
+output/

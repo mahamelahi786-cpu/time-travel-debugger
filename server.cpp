@@ -235,21 +235,132 @@ struct PendingPatch
 
 
 // PASS 0x0: READING source.bin + VALIDITY CHECK
+bool is_white_space(char c){
+    if (c=='\t' || c==' ' || c=='\r'){
+        return true;
+    }
+    return false;
+
+}
+
 bool readSourceLine(ifstream& in, string& out)
 {
-    // reads the next nonblank line
+   // reads the next nonblank line
+   string line;
+   while(getline(in, line)){
+    int size = line.length();
+    int idx = 0;
+    while(idx<size && is_white_space(line[idx])){
+        idx++;
+    }
+    if (idx < size){
+        out = line;
+        return true;
+    }
+    
+   }
+   
+   return false;
 }
 string firstWord(const string& line)
 {
     // returns first word from the input string
+    int size = line.length();
+    int start = 0;
+    while(start<size && is_white_space(line[start])){
+        start++;
+    }
+
+    if(start == size){
+        return "";
+    }
+
+    int end = start;
+
+    while(end<size && !is_white_space(line[end])){
+        end++;
+
+    }
+
+    return line.substr(start, end-start);
+
 }
+
 string secondWord(const string& line)
 {
+    int size = line.length();
+    int start = 0;
+    while(start<size && is_white_space(line[start])){
+        start++;
+    }
+
+    while(start<size && !is_white_space(line[start])){
+        start++;
+    }
+
+    while(start<size && is_white_space(line[start])){
+        start++;
+    }
+
+    if(start == size){
+        return "";
+    }
+
+    int end = start;
+
+    while(end<size && !is_white_space(line[end])){
+        end++;
+
+    }
+
+    return line.substr(start, end-start);
+
     // returns the second word
 }
+
 bool validateProgram(const char* sourcePath)
 {
     // for each func defined there should be exactly one func_end and no nested funcs allowed - 
+    ifstream fin(sourcePath);
+    if(!fin){
+        cout<<"Error: Cannot Open " <<sourcePath <<endl;
+        return false;
+    }
+
+    Stack<string> function_stack;
+    string line;
+    int line_no = 0;
+
+    while(readSourceLine(fin, line)){
+        line_no++;
+        string word = firstWord(line);
+
+        if (word == "func"){
+            if(!function_stack.isEmpty()){
+                cout <<"Error at line " << line_no << " : because nested func not allowed"<<endl;
+                return false;
+            }
+
+            string name = secondWord(line);
+            if (name == ""){
+                cout <<"Error at line " << line_no << " : func has no name"<<endl;
+                return false;
+            }
+            function_stack.push(name);
+        }else if(word == "func_end"){
+            if(function_stack.isEmpty()){
+            cout <<"Error at line " <<line_no <<" : func_end without any func"<<endl;
+            return false;
+            }
+            function_stack.pop();
+        }  
+    }
+
+    if (!function_stack.isEmpty()){
+            cout<<"Error: func "<< function_stack.peek() <<" has no func_end"<<endl;
+            return false;
+    }
+    return true;
 }
 
 // PASS 0x1: RESOLVE() -> resolve.bin
@@ -357,6 +468,17 @@ int32_t main()
         current = current->prev;
     }
     cout << endl;
+
+    cout<<"validation testing"<<endl;
+    bool validate;
+    validate = validateProgram("tests/valid.bin");
+    cout <<"valid: " << validate << endl;
+    validate = validateProgram("tests/bad_missing_end.bin");
+    cout <<"missing end: " << validate << endl;
+    validate = validateProgram("tests/bad_extra_end.bin");
+    cout <<"extra end: " << validate << endl;
+    
+   
 
     return 0;
 

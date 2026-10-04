@@ -1,0 +1,5 @@
+func foo b
+set a 10
+add b a
+func_end
+func_end

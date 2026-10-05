@@ -4,3 +4,4 @@ resolve.bin
 session.tdbg
 .vscode/
 output/
+binary_testing/

@@ -22,3 +22,10 @@
 
 ### Next day
 - Implement 0x1 and test it
+
+## 5th October
+### Completed 
+- Implemented writeResolveRecord & readResolveRecord from 0x1 
+
+### Next day 
+- I will be implementing ResolveProgramme

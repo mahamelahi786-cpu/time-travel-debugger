@@ -6,7 +6,7 @@
 - Gitignore file was created to ignore the unnecessary files
 - Implemented stack data structure in server.cpp
 - Implemented doubly linked list data structure
-
+s
 ## 3rd October
 ### completed
 - Set up vs code and installed linux through wsl 

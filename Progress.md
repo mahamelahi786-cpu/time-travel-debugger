@@ -29,3 +29,9 @@ s
 
 ### Next day 
 - I will be implementing ResolveProgramme
+
+### 7th October
+- Completed my resolveProgramme for 0X1 fully and its working and giving the text and offset as checked by main
+- In resolve program wherever there was no "call" or "func" or we had something like set or anything else i kept its offset value in resolve.bin as its position in source.bin 
+- Moving on to OX2 completed the Tokenlinesize by 0=keyword, 1=identifier and 2=param
+- Tested TokenLinesize with main and it is working correctly and also giving count incremented

@@ -407,12 +407,10 @@ int64_t readResolveRecord(FILE* f, string& outText)
 
     // reads one record at the current position and advances past it, returns the offset field - the raw line text comes back untouched in outText.
 }
+
 int64_t resolveProgram(const char* sourcePath, const char* resolveBinPath)
 {
-    FuncEntry funcArray[MAX_FUNCS];
-    int32_t funcCount = 0;
-    PendingPatch patches[MAX_PATCHES];
-    int32_t patchCount = 0;
+    
     // Every source line becomes one record holding the raw line, as-is.
     // resolve() only PEEKS at the leading word(s) -- enough to spot FUNC
     // (remember its position) and CALL (remember which function it needs
@@ -421,6 +419,108 @@ int64_t resolveProgram(const char* sourcePath, const char* resolveBinPath)
     // with its target's position. Patching happens after the full write
     // Returns the byte offset of main's FUNC header record.
     // if there is no main return the error 
+    
+    FuncEntry funcArray[MAX_FUNCS];
+    int32_t funcCount = 0;
+    PendingPatch patches[MAX_PATCHES];
+    int32_t patchCount = 0;
+    int64_t mainoffset = -1;
+    ifstream fin(sourcePath);
+    if(!fin){
+        cout <<"Error: Cannot open file "<<sourcePath<<endl;
+        return -1;
+    }
+
+    FILE* f = fopen(resolveBinPath, "wb");
+    if (f==nullptr){
+        cout <<"Error: Cannot open resolve file "<<resolveBinPath<<endl;
+        return -1;
+    }
+
+    string line;
+
+    while(readSourceLine(fin, line)){
+        string word = firstWord(line);
+        int64_t pos = ftell(f);
+        int64_t recordoffset_pos = writeResolveRecord(f, pos, line);
+
+        if (word == "func"){
+            string function_name = secondWord(line);
+
+            if(function_name==""){
+                cout << "Error: function has no name"<<endl;
+                fclose(f);
+                return -1;
+            }
+
+            if(funcCount>=MAX_FUNCS){
+                cout <<"Error: Too many functions"<<endl;
+                fclose(f);
+                return -1;
+            }
+
+            funcArray[funcCount].funcName = function_name;
+            funcArray[funcCount].byteOffsetInResolveBin = recordoffset_pos;
+            funcCount++;
+
+            if (function_name == "main"){
+                mainoffset = recordoffset_pos;
+            }
+
+        }else if (word == "call"){
+            string target_func = secondWord(line);
+
+            if (target_func==""){
+                cout <<"Error: call has no target"<<endl;
+                fclose(f);
+                return -1;
+            }
+
+            if(patchCount>=MAX_PATCHES){
+                cout <<"Error: Too many call patch"<<endl;
+                fclose(f);
+                return -1;
+            }
+
+            patches[patchCount].targetFuncName = target_func;
+            patches[patchCount].byteOffsetOfOffsetField = recordoffset_pos;
+            patchCount++;
+        }
+    }
+
+    for(int32_t i =0; i<patchCount; i++){
+        int64_t targetoffset = -1;
+
+        for(int32_t j = 0; j<funcCount; j++){
+            if (funcArray[j].funcName == patches[i].targetFuncName){
+                targetoffset = funcArray[j].byteOffsetInResolveBin;
+                break;
+            }
+        }
+
+        if (targetoffset==-1){
+            cout <<"Error: Function " << patches[i].targetFuncName <<" was not found"<<endl;
+            fclose(f);
+            return -1;
+        }
+
+        if (fseek(f, patches[i].byteOffsetOfOffsetField, SEEK_SET)!=0){
+            cout <<"Error: Could not seek patch location"<<endl;
+            fclose(f);
+            return -1;
+        }
+
+        fwrite(&targetoffset, sizeof(int64_t), 1, f);
+    }
+    fclose(f);
+
+    if(mainoffset==-1){
+        cout <<"Error: main function was not found"<<endl;
+        return -1;
+    }
+
+    return mainoffset;
+
 }
 
 // PASS 0x2: EXECUTION (tokenization happens here)
@@ -441,6 +541,37 @@ int32_t tokenizeLine(const string& line, Token tokens[], int32_t maxTokens)
     // instruction set = [func, func_end, call, set, add, sub, mul and div]
     // next word is identifier like name of a function, variable name
     // after identifier all are the params/arg, space separated
+
+    int size = line.length();
+    int idx = 0;
+    int32_t token_count = 0;
+
+    while (idx < size && token_count < maxTokens){
+        while(idx<size && is_white_space(line[idx])){
+            idx++;
+        }
+
+        if (idx == size){
+            break;
+        }
+
+        int start = idx;
+        while (idx<size && !is_white_space(line[idx])){
+            idx++; 
+        }
+
+        tokens[token_count].text = line.substr(start, idx-start);
+
+        if(token_count==0){
+            tokens[token_count].type = KEYWORD;
+        }else if (token_count==1){
+            tokens[token_count].type = IDENTIFIER;
+        }else{
+            tokens[token_count].type = PARAM;
+        }
+        token_count++;
+    }
+    return token_count;
 }
 Snapshot* buildSnapshot(Stack<Frame>& callStack)
 {
@@ -468,6 +599,7 @@ void writeTdbg(Timeline& timeline, const char* tdbgPath)
 // main section
 int32_t main()
 {
+   
     Stack<int> s;
     s.push(1);
     s.push(2);
@@ -483,6 +615,7 @@ int32_t main()
         cout << "Caught: " << e.what() << endl;
     }
 
+    cout <<"--------------------------------------------"<<endl;
     Timeline t;
     for (int i = 1; i <= 3; i++) {
         Snapshot* snap = new Snapshot;
@@ -502,7 +635,7 @@ int32_t main()
         current = current->prev;
     }
     cout << endl;
-
+    cout <<"--------------------------------------------"<<endl;
     cout<<"validation testing"<<endl;
     bool validate;
     validate = validateProgram("tests/valid.bin");
@@ -538,22 +671,56 @@ int32_t main()
     }
 
     fclose(reading_binary);
+
+    cout <<"--------------------------------------------"<<endl;
+    cout <<"Program resolve test"<<endl;
+    int64_t main_pos = resolveProgram("tests/resolve_test.bin", "binary_testing/resolve.bin");
+    cout <<"main is at:"<<main_pos<<endl;
+
+    FILE* rf = fopen("binary_testing/resolve.bin", "rb");
+
+    if (rf == nullptr){
+        cout <<"Cannot open resolve.bin"<<endl;
+    }
+    string rtext;
+    int64_t roff = readResolveRecord(rf, rtext);
+    
+    while(roff!=-1){
+        cout <<"Offset: "<<roff<<" text=" << rtext << endl;
+        roff = readResolveRecord(rf, rtext);
+    }
+
+    fclose(rf);
+
+    cout << resolveProgram("tests/no_main.bin", "binary_testing/resolve2.bin")<<endl;
+
+    cout <<"--------------------------------------------"<<endl;
+    cout <<"tokensize test"<<endl;
+    Token tokens[MAX_TOKENS];
+    int32_t n = tokenizeLine ("func foo b", tokens, MAX_TOKENS);
+    cout <<"count= " <<n<<endl;
+    for (int i=0; i<n; i++){
+        cout <<tokens[i].type <<" " << tokens[i].text<<endl;
+    } 
+    n= tokenizeLine("func_end", tokens, MAX_TOKENS);
+    cout <<"count= " << n << endl;
+    cout <<"--------------------------------------------"<<endl;
    
 
     return 0;
 
-    if (!validateProgram("source.bin"))
-    {
-        // send an error response instead of a .tdbg file
-        return 1;
-    }
+    // if (!validateProgram("source.bin"))
+    // {
+    //     // send an error response instead of a .tdbg file
+    //     return 1;
+    // }
 
-    int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+    // int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
 
-    Timeline timeline;
-    executeProgram("resolve.bin", mainOffset, timeline);
+    // Timeline timeline;
+    // executeProgram("resolve.bin", mainOffset, timeline);
 
-    writeTdbg(timeline, "session.tdbg");
+    // writeTdbg(timeline, "session.tdbg");
 
-    return 0;
+    // return 0;
 }

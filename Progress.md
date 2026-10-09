@@ -43,11 +43,12 @@
 - Will be starting with the last stage
 
 ## 9th October
-- Fixed some errors in my Code and wrote small main to test each function and also started over 0x3 
-- Wrote some helper functions
+- Fixed some errors in my Code and wrote small main to test each function 
+- Fixed bugs in executeProgramme as the record was being read twice per loop.
+- Started 0x3:completed writeheader and helper function
 
 ### Next Day
-- Will Finish off 0x3 
+- Will Finish off 0x3 and run on original main
 
 
 

@@ -8,7 +8,7 @@
 //   4. Pass 0X3   -- serialize Timeline -> session.tdbg(header + snapshot records + dense index)
 
 
-#include<iostream>
+#include <iostream>
 #include <string>
 #include <cstdint>
 #include <fstream>
@@ -223,6 +223,8 @@ void writeHeader(FILE* f, const TTDBHeader& h)
 {
     fwrite(h.magic, 1, 4, f);
     fwrite(&h.version, sizeof(int32_t), 1, f);
+    fwrite(&h.stepCount, sizeof(int32_t), 1, f);
+    fwrite(&h.indexOffset, sizeof(int64_t),1, f);
 
     // placeholder for other two data members
 }
@@ -654,6 +656,7 @@ bool get_value(Frame& frame, const string& word, int32_t& result){
     result = var->value;
     return true;
 }
+
 void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& timeline)
 {
     // initialize the call stack
@@ -857,6 +860,14 @@ void show_timeline(Timeline& t){
         step = step->next;
         step_ct++;
     }
+
+}
+
+
+void write_string(FILE* f, const string& txt){
+    int32_t size = txt.length();
+    fwrite(&size, sizeof(int32_t), 1, f);
+    fwrite(txt.c_str(), 1, size, f);
 
 }
 

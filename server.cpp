@@ -798,6 +798,11 @@ void executeProgram(const char* resolveBinPath, int64_t mainOffset, Timeline& ti
                 newframe.argv[i].value = arg_values[i];
             }
 
+            if(callStack.depth()>=MAX_STACK_DEPTH){
+                cout << "Error: Stack is full (too many nested calls)" << endl;
+                break; 
+            }
+
             callStack.push(newframe);
 
             
@@ -871,6 +876,38 @@ void write_string(FILE* f, const string& txt){
 
 }
 
+void writeVariable(FILE* f, const Variable& v){
+    write_string(f, v.name);
+    fwrite(&v.value, sizeof(int32_t), 1, f);
+
+}
+
+void writeFrame(FILE* f, const Frame& frame){
+    write_string(f, frame.func_name);
+
+    fwrite(&frame.argc, sizeof(int32_t), 1, f);
+
+    for (int i=0; i<frame.argc; i++){
+        writeVariable(f, frame.argv[i]);
+    }
+
+    fwrite(&frame.returnLine, sizeof(int32_t), 1, f);
+
+    fwrite(&frame.localCount, sizeof(int32_t), 1, f);
+
+    for(int i=0; i<frame.localCount; i++){
+        writeVariable(f, frame.locals[i]);
+    }
+}
+
+void write_snapshot(FILE* f, const Snapshot& s){
+    fwrite(&s.stackDepth, sizeof(int32_t), 1, f);
+
+    for(int i=0; i<s.stackDepth; i++){
+        writeFrame(f, s.callStack[i]);
+    }
+}
+
 // PASS 0x3: SERIALIZE TIMELINE
 void writeTdbg(Timeline& timeline, const char* tdbgPath)
 {
@@ -879,154 +916,70 @@ void writeTdbg(Timeline& timeline, const char* tdbgPath)
     // placing each snapshot in the file while maintaining the index(starting point of each nth snapshot)
     // after timeline add the index array i the file
     // update the header
+    FILE* f = fopen(tdbgPath, "wb");
+    if(f == nullptr){
+        cout << "Error: Cannot open "<< tdbgPath << endl;
+        return;
+    }
+
+    int32_t steps = timeline.getStepCount();
+
+    TTDBHeader header;
+    header.magic[0] = 'T';
+    header.magic[1] = 'T';
+    header.magic[2] = 'D';
+    header.magic[3] = 'B';
+
+    header.version = 1;
+    header.stepCount = steps;
+    header.indexOffset = 0;
+    writeHeader(f, header);
+
+    int64_t* index = new int64_t[steps];
+
+    if(steps>0){
+        TimelineNode* Node = timeline.begin();
+        int32_t i = 0;
+
+        while(Node != nullptr){
+            index[i] = ftell(f);
+            write_snapshot(f, *(Node->data));
+            Node = Node->next;
+            i++;
+        }
+    }
+
+    int64_t index_start = ftell(f);
+    fwrite(index, sizeof(int64_t), steps, f);
+    delete[] index;
+
+    header.indexOffset = index_start;
+    fseek(f,0,SEEK_SET);
+    writeHeader(f, header);
+    fclose(f);
+
+    
+
+
 }
 // main section
 int32_t main()
 {
    
-    Stack<int> s;
-    s.push(1);
-    s.push(2);
-    s.push(3);
-    cout << s.pop() << endl;
-    cout << s.pop() << endl;
-    cout << s.pop() << endl;
-    cout << s.isEmpty() << endl;
-    try {
-        s.pop();
-    }
-    catch (underflow_error& e) {
-        cout << "Caught: " << e.what() << endl;
+    if (!validateProgram("source.bin")){
+    // send an error response instead of a .tdbg file
+        return 1;
     }
 
-    cout <<"--------------------------------------------"<<endl;
-    Timeline t;
-    for (int i = 1; i <= 3; i++) {
-        Snapshot* snap = new Snapshot;
-        snap->stackDepth = i * 10;
-        t.record(snap);
-    }
-    cout << "steps = " << t.getStepCount() << endl;
-
-    TimelineNode* current = t.begin();
-    while (current->next != nullptr) {
-        cout << current->data->stackDepth << " ";
-        current = current->next;
-    }
-    cout << current->data->stackDepth << endl;
-    while (current != nullptr) {
-        cout << current->data->stackDepth << " ";
-        current = current->prev;
-    }
-    cout << endl;
-    cout <<"--------------------------------------------"<<endl;
-    cout<<"validation testing"<<endl;
-    bool validate;
-    validate = validateProgram("tests/valid.bin");
-    cout <<"valid: " << validate << endl;
-    validate = validateProgram("tests/bad_missing_end.bin");
-    cout <<"missing end: " << validate << endl;
-    validate = validateProgram("tests/bad_extra_end.bin");
-    cout <<"extra end: " << validate << endl;
-    
-    FILE* binary_writing = fopen("binary_testing/test_resolve.bin", "wb");
-    writeResolveRecord(binary_writing, 0, "func foo b");
-    writeResolveRecord(binary_writing, 22, "set a 10");
-    writeResolveRecord(binary_writing, 42, "func_end");
-
-    fclose(binary_writing);
-
-    FILE* reading_binary = fopen("binary_testing/test_resolve.bin", "rb");
-
-    if (reading_binary==nullptr){
-        cout <<"Cannot open file"<<endl;
-    }
-    string text;
-    int64_t offset_values;
-
-    offset_values = readResolveRecord(reading_binary,text);
-
-    while(offset_values != -1){
-        cout<<"Offset: "<<offset_values<<endl;
-        cout <<"Text: " << text<<endl;
-        cout<<endl;
-        
-        offset_values = readResolveRecord(reading_binary, text);
+    int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
+    if (mainOffset==-1){
+        return 1;
     }
 
-    fclose(reading_binary);
+    Timeline timeline;
+    executeProgram("resolve.bin", mainOffset, timeline);
 
-    cout <<"--------------------------------------------"<<endl;
-    cout <<"Program resolve test"<<endl;
-    int64_t main_pos = resolveProgram("tests/resolve_test.bin", "binary_testing/resolve.bin");
-    cout <<"main is at:"<<main_pos<<endl;
+    writeTdbg(timeline, "session.tdbg");
 
-    FILE* rf = fopen("binary_testing/resolve.bin", "rb");
-
-    if (rf == nullptr){
-        cout <<"Cannot open resolve.bin"<<endl;
-    }
-    string rtext;
-    int64_t roff = readResolveRecord(rf, rtext);
-    
-    while(roff!=-1){
-        cout <<"Offset: "<<roff<<" text=" << rtext << endl;
-        roff = readResolveRecord(rf, rtext);
-    }
-
-    fclose(rf);
-
-    cout << resolveProgram("tests/no_main.bin", "binary_testing/resolve2.bin")<<endl;
-
-    cout <<"--------------------------------------------"<<endl;
-    cout <<"tokensize test"<<endl;
-    Token tokens[MAX_TOKENS];
-    int32_t n = tokenizeLine ("func foo b", tokens, MAX_TOKENS);
-    cout <<"count= " <<n<<endl;
-    for (int i=0; i<n; i++){
-        cout <<tokens[i].type <<" " << tokens[i].text<<endl;
-    } 
-    n= tokenizeLine("func_end", tokens, MAX_TOKENS);
-    cout <<"count= " << n << endl;
-    cout <<"--------------------------------------------"<<endl;
-   
-    cout <<"Snapshot testing"<<endl;
-    Stack<Frame> test_S;
-
-    Frame f1;
-    f1.func_name = "main";
-    f1.argc = 0;
-    f1.returnLine = -1;
-    f1.localCount = 1;
-    f1.locals[0].name = "k";
-    f1.locals[0].value = 10;
-    test_S.push(f1);
-    Snapshot* snap = buildSnapshot(test_S);
-    cout <<"depth= " << snap->stackDepth<<endl;
-    cout <<"At [0]->top of stack: " << snap->callStack[0].func_name<<" k= "<< snap->callStack[0].locals[0].value<<endl;
-    delete snap;
-    cout <<"--------------------------------------------"<<endl;
-
-    cout << "Testing execute programme"<<endl;
-    int64_t test = resolveProgram("tests/executePrgm.bin", "binary_testing/executePrgm_resolve.bin");
-    Timeline t1;
-    executeProgram("binary_testing/executePrgm_resolve.bin",test,t1);
-    show_timeline(t1);
-    cout <<"--------------------------------------------"<<endl;
     return 0;
-
-    // if (!validateProgram("source.bin"))
-    // {
-    //     // send an error response instead of a .tdbg file
-    //     return 1;
-    // }
-
-    // int64_t mainOffset = resolveProgram("source.bin", "resolve.bin");
-
-    // Timeline timeline;
-    // executeProgram("resolve.bin", mainOffset, timeline);
-
-    // writeTdbg(timeline, "session.tdbg");
-
-    // return 0;
 }

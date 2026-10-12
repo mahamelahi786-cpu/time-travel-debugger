@@ -50,5 +50,11 @@
 ### Next Day
 - Will Finish off 0x3 and run on original main
 
+## 12th October
+- Finished 0X3, writeVariable, writeFrame, write_snapshot and writeTdgb
+- Tested the .tdgb file 
+- Restored the original main so the code full pipeline runs
+
+
 
 

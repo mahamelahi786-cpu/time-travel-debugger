@@ -57,12 +57,15 @@
 
 ## 8th November
 # Started off with phase 2 on 6th November 
-- helper.h: completed my helper.h by writing the common structs fir both server and client 
-- sendAll and recAll: loops, because send and recv can move fewer bytes than asked.
-- CRC-32(table method), tested of in main and worked correctly
-
+- helper.h: completed my helper.h by writing the common structs for both server and client 
+- sendAll and recvAll: loops, to send and receive the complete message
+- CRC-32(table method) implemented because to store the values
+- Tested in main and ensured that it worked correctly
 - Implemented 'TrailerChecker' in 'helper.h' to verify the CRC-32 of data received in chunks. It holds back the latest four bytes while processing the stream. When the stream ends, it reads those four bytes as the sender's checksum and compares it with the CRC calculated from the message.
-- Tested it with a message split into two chunks and then one byte at a time. Both tests recovered the original message and passed verification. 
+- Tested it with a message split into two chunks and then one byte at a time. Both tests recovered the original message and passed verification.
 
-
+- Finished part A of client.cpp. The client can connet to load balancer, upload the source file in chunks and then receive the response.
+- Added a status byte before source file and included in CRC. Used SHUT_WR so client can still receive the reply.
+- Added requestDebugFile() to call connect, upload and receive function from part A of client.cpp and close the socket after request
+- Next i will be starting off with part B.
 

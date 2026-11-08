@@ -55,6 +55,13 @@
 - Tested the .tdgb file 
 - Restored the original main so the code full pipeline runs
 
+## 8th November
+# Started off with phase 2 on 6th November 
+- helper.h: completed my helper.h by writing the common structs fir both server and client 
+- sendAll and recAll: loops, because send and recv can move fewer bytes than asked.
+- CRC-32(table method), tested of in main and worked correctly
+
+
 
 
 

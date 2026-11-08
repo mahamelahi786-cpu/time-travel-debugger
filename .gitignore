@@ -6,3 +6,7 @@ session.tdbg
 output/
 binary_testing/
 source.bin
+/server
+/test_socket_helper
+/test_crc
+/baseline.tdbg

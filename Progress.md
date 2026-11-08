@@ -61,7 +61,8 @@
 - sendAll and recAll: loops, because send and recv can move fewer bytes than asked.
 - CRC-32(table method), tested of in main and worked correctly
 
-
+- Implemented 'TrailerChecker' in 'helper.h' to verify the CRC-32 of data received in chunks. It holds back the latest four bytes while processing the stream. When the stream ends, it reads those four bytes as the sender's checksum and compares it with the CRC calculated from the message.
+- Tested it with a message split into two chunks and then one byte at a time. Both tests recovered the original message and passed verification. 
 
 
 

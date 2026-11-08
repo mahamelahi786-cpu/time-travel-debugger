@@ -115,13 +115,13 @@ struct CrcTable{
 
 const uint32_t  CRC_START = 0xFFFFFFFFu;
 
-inline uint32_t table_index(uint32_t crc, const char* data, size_t n){
+inline uint32_t crc_update(uint32_t crc, const char* data, size_t n){
     static const CrcTable table;
     for(size_t i=0; i<n; i++){
         unsigned char byte = static_cast<unsigned char>(data[i]);
 
-        uint32_t index = (crc^byte) & 0xFFu;
-        crc = table.values[index] ^ (crc >> 8);
+        uint32_t table_index = (crc^byte) & 0xFFu;
+        crc = table.values[table_index] ^ (crc >> 8);
     }
 
     return crc;
@@ -130,3 +130,65 @@ inline uint32_t table_index(uint32_t crc, const char* data, size_t n){
 inline uint32_t crc_finish(uint32_t crc){
     return crc ^ 0xFFFFFFFFu;
 }
+
+inline void write_u32(char* out, uint32_t value){
+    out[0] = static_cast<char>((value >> 24) & 0xFFu);
+    out[1] = static_cast<char>((value >> 16) & 0xFFu);
+    out[2] = static_cast<char>((value >> 8) & 0xFFu);
+    out[3] = static_cast<char>(value & 0xFFu);
+}
+
+inline uint32_t read_u32(const char* in){
+    uint32_t first = static_cast<unsigned char>(in[0]);
+    uint32_t second = static_cast<unsigned char>(in[1]);
+    uint32_t third = static_cast<unsigned char>(in[2]);
+    uint32_t fourth = static_cast<unsigned char>(in[3]);
+
+    return(first << 24) | (second << 16) | (third << 8) | fourth;
+
+}
+
+class TrailerChecker{
+    string pending;
+    uint32_t crc;
+
+ public:
+    TrailerChecker(){
+        crc = CRC_START;
+    }
+
+    string feed(const char* data, size_t n){
+        pending.append(data, n);
+
+        if(pending.size() <= 4){
+            return "";
+        }
+
+        size_t bodySize = pending.size() - 4;
+        string body = pending.substr(0, bodySize);
+
+        crc = crc_update(crc, body.data(), body.size());
+        pending.erase(0, bodySize);
+        return body;
+    }
+
+    bool verify()const{
+        if (pending.size() != 4){
+            return false;
+        }
+
+        uint32_t receivedCrc = read_u32(pending.data());
+        uint32_t calculatedCrc = crc_finish(crc);
+
+        return receivedCrc == calculatedCrc;
+
+    }
+
+    uint32_t checksum() const{
+        return crc_finish(crc);
+    }
+
+
+
+  
+};

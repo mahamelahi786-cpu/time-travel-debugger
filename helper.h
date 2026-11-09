@@ -51,9 +51,9 @@ struct PendingPatch
 };
 
 inline bool sendAll(int sock, const char* buf, size_t n){
-     // recv() can return fewer bytes than asked for, so keep calling it until exactly n bytes are read.
-     // Return false if the connection closes or fails before n bytes arrive.
-
+    
+    // send() can send fewer bytes than asked for, so keep calling it until all n bytes are sent.
+     // Use the flag MSG_NOSIGNAL. Return false if the connection fails.
     size_t sent = 0;
 
     while (sent < n){
@@ -76,9 +76,9 @@ inline bool sendAll(int sock, const char* buf, size_t n){
 }
 
 inline bool recvAll(int sock, char* buf, size_t n){
-    // send() can send fewer bytes than asked for, so keep calling it until all n bytes are sent.
-     // Use the flag MSG_NOSIGNAL. Return false if the connection fails.
-
+    
+     // recv() can return fewer bytes than asked for, so keep calling it until exactly n bytes are read.
+     // Return false if the connection closes or fails before n bytes arrive.
     size_t got = 0;
 
     while (got < n){

@@ -69,3 +69,6 @@
 - Added requestDebugFile() to call connect, upload and receive function from part A of client.cpp and close the socket after request
 - Next i will be starting off with part B.
 
+## 9th November 
+- Completed part B of client.cpp and wrote down its functions of openTDBG and closeTdbg and then helper functions required for readsnapshotAt 
+- checked it against a temporary main whether its working correctly or not.

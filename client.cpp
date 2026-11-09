@@ -22,6 +22,7 @@
 #include <signal.h>
 #include <vector>
 #include <sys/socket.h>
+#include <sys/time.h>
 #include "helper.h"
 #include <arpa/inet.h>
 using namespace std;
@@ -72,8 +73,9 @@ int LB_PORT = 5000;
 // ---- Structs only the client needs ----
 struct TdbgReader
 {
-    ssize_t file_index;
-    TTDBHeader header;
+    // ssize_t file_index;
+    FILE* file = nullptr;
+    TTDBHeader header{};
     vector<int64_t> index;
 };
 struct DebugSession
@@ -186,7 +188,11 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
             if(errno==EINTR){
                 continue;
             }
-            outError ="failed to receive response";
+            if (errno == EAGAIN || errno == EWOULDBLOCK){
+                outError = "timed out waiting for a response";
+            }else{
+                outError = "failed to receive response";
+            }
             break;
         }
 
@@ -237,7 +243,14 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
             }
 
         }else{
-            serverError.append(payload,payloadSize);
+            const size_t maxErrorSize = 4096;
+            size_t remaining = maxErrorSize - serverError.size();
+            size_t toKeep = payloadSize;
+
+            if(toKeep > remaining){
+                toKeep = remaining;
+            }
+            serverError.append(payload,toKeep);
         }
     }
 
@@ -270,9 +283,24 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
 
 bool requestDebugFile(const char* sourcePath, const char* tempPath, string& outError){
     outError.clear();
+    FILE* test = fopen(sourcePath, "rb");
+    if(test == nullptr){
+        outError = "could not open the source file";
+        return false;
+    }
+    fclose(test);
     int sock = connectToHost(LB_HOST.c_str(), LB_PORT);
     if(sock<0){
         outError = "could not connect to the load balancer";
+        return false;
+    }
+
+    timeval timeout{};
+    timeout.tv_sec = 30;
+
+    if(setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout))!=0){
+        outError = "could not set the receive timeout";
+        close(sock);
         return false;
     }
 
@@ -297,13 +325,160 @@ bool requestDebugFile(const char* sourcePath, const char* tempPath, string& outE
 
 bool openTdbg(const char *path, TdbgReader &r)
 {
+    const int64_t headerSize = 20;
+    const int32_t supportedVersion = 1;
+
+    if(r.file != nullptr){
+        return false;
+    }
+
+    FILE *file = fopen(path, "rb");
+    if(file==nullptr){
+        return false;
+    }
+
+    TTDBHeader header{};
+    if(fread(header.magic, 1, 4, file)!= 4 || fread(&header.version, sizeof(header.version), 1, file) != 1 || fread (&header.stepCount, sizeof(header.stepCount), 1, file)!= 1 || fread (&header.indexOffset, sizeof(header.indexOffset), 1, file)!= 1){
+        fclose(file);
+        return false;
+    }
+    
+    if (memcmp(header.magic, "TTDB", 4)!=0 || header.version != supportedVersion || header.stepCount <= 0){
+        fclose(file);
+        return false;
+    }
+
+    if (fseek(file, 0, SEEK_END)!=0){
+        fclose(file);
+        return false;
+    }
+
+    long fileSize = ftell(file);
+    int64_t indexSize = static_cast<int64_t>(header.stepCount)*8;
+
+    if (fileSize < headerSize || header.indexOffset < headerSize || header.indexOffset > fileSize || indexSize != fileSize - header.indexOffset){
+        fclose(file);
+        return false;
+    }
+
+    if (fseek(file, static_cast<long> (header.indexOffset), SEEK_SET)!=0){
+        fclose(file);
+        return false;
+    }
+
+    vector<int64_t> offsets;
+    int64_t previous = headerSize -1;
+
+    for (int32_t i=0; i<header.stepCount; i++){
+        int64_t offset;
+
+        if(fread(&offset, sizeof(offset), 1, file)!=1 || offset <= previous || offset >= header.indexOffset){
+            fclose(file);
+            return false;
+        }
+
+        offsets.push_back(offset);
+        previous = offset;
+
+
+    }
+
+    r.file = file;
+    r.header = header;
+    r.index.swap(offsets);
+    return true;
 }
 void closeTdbg(TdbgReader &r)
 {
     // Free r.index and close the file.
+    if(r.file != nullptr){
+        fclose(r.file);
+        r.file = nullptr;
+    }
+
+    r.header = TTDBHeader{};
+    r.index.clear();
 }
+
+
+bool readString(FILE* file, string& text, int64_t end){
+    int32_t length;
+    if(fread(&length, sizeof(length), 1, file)!=1){
+        return false;
+    }
+
+    long position = ftell(file);
+    if(length < 0 || position == -1 || length > end - position){
+        return false;
+    }
+
+    text.resize(length);
+    if(length > 0 && fread(&text[0], 1, length, file)!= static_cast<size_t>(length)){
+        return false;
+    }
+    return true;
+}
+
+bool readVariable(FILE* file, Variable& var, int64_t end){
+    return readString(file, var.name, end) && fread(&var.value, sizeof(var.value), 1, file)==1;
+ 
+}
+
+bool fillSnapshot(FILE* file, Snapshot& snap, int64_t end){
+    if(fread(&snap.stackDepth, sizeof(int32_t), 1, file)!=1 || snap.stackDepth < 0 || snap.stackDepth > MAX_STACK_DEPTH){
+        return false;
+    }
+
+    for(int32_t i = 0; i< snap.stackDepth; i++){
+        Frame& frame = snap.callStack[i];
+
+        if(!readString(file, frame.func_name, end) || fread(&frame.argc, sizeof(int32_t), 1, file)!=1 || frame.argc < 0 || frame.argc > MAX_VARS_PER_FRAME){
+            return false;
+        }
+
+        for(int32_t j = 0;j<frame.argc; j++){
+            if(!readVariable(file, frame.argv[j], end)){
+                return false;
+            }
+        }
+
+        if(fread(&frame.returnLine, sizeof(int32_t), 1, file)!=1 || fread(&frame.localCount, sizeof(int32_t), 1, file)!= 1 || frame.localCount < 0 || frame.localCount > MAX_VARS_PER_FRAME){
+            return false;
+        }
+
+        for (int32_t j = 0; j< frame.localCount; j++){
+            if(!readVariable(file, frame.locals[j], end)){
+                return false;
+            }
+        }
+
+    }
+    return ftell(file) == end;
+}
+
 Snapshot *readSnapshotAt(TdbgReader &r, int32_t step)
 {
+    if (r.file == nullptr || step < 0 || step >= static_cast<int32_t>(r.index.size())){
+        return nullptr;
+    }
+
+    int64_t start = r.index[step];
+    int64_t end = r.header.indexOffset;
+    if(step + 1 < static_cast<int32_t>(r.index.size())){
+        end = r.index[step + 1];
+    }
+
+    if (fseek(r.file, static_cast<long>(start), SEEK_SET)!=0){
+        return nullptr;
+    }
+
+    Snapshot* snap = new Snapshot;
+    if(!fillSnapshot(r.file, *snap, end)){
+        delete snap;
+        return nullptr;
+    }
+    return snap;
+
 }
 
 // =============================================================================================
@@ -393,4 +568,7 @@ int main(int argc, char *argv[])
     // After the loop: closeSession(session) and return 0.
     // Never exit the loop because of an error. Only quit or the end of the input leaves it.
 
+    
+    return 0;
 }
+

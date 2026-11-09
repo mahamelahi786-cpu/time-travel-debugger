@@ -72,3 +72,8 @@
 ## 9th November 
 - Completed part B of client.cpp and wrote down its functions of openTDBG and closeTdbg and then helper functions required for readsnapshotAt 
 - checked it against a temporary main whether its working correctly or not.
+- Completed part C and D which included initSession, closeSession, showCurrent, moveBy, next, prv, jmp, cmdStart. A new download goes into temp file, sp a failed download keeps theold session.
+Completed part E and F which included printHelp, runCommand, main\. Tested commands and bad jump numbers
+
+### Next
+- will be starting with load balancer

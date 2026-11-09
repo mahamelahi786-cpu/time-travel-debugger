@@ -25,6 +25,7 @@
 #include <sys/time.h>
 #include "helper.h"
 #include <arpa/inet.h>
+#include <sstream>
 using namespace std;
 
 // ---- Constants ----
@@ -35,6 +36,7 @@ const char *TDBG_FILE = "ttdb_last.tdbg"; // where the downloaded .tdbg is saved
 const int MAX_JUMP = 1000000000;          // biggest n accepted by jmp
 string LB_HOST = "127.0.0.1";
 int LB_PORT = 5000;
+const char *TEMP_TDBG_FILE = "ttdb_new.tdbg";
 
 // These two must be the same as in Phase 1
 
@@ -488,12 +490,21 @@ Snapshot *readSnapshotAt(TdbgReader &r, int32_t step)
 
 void initSession(DebugSession &s)
 {
+    s.active_flag = 0; // koi session start nahi hua
+    s.currentStep = 0; // jab session start hoga, pehla step code ma zero hoga
+    s.reader = TdbgReader{}; // blank reader
    
 }
 void closeSession(DebugSession &s)
 {
     // If active, call closeTdbg(s.reader). Then set active = false.
+    if(s.active_flag){ // if session active so close k function sa usse close krdo
+        closeTdbg(s.reader);
+    }
+    s.active_flag =0; //next, prev will know that pehla start chhaiya
+    s.currentStep = 0; //step reset ho jata hai. Dobara closeSession call ho tou flag 0 hai
     // Called when the user types quit and when the input ends.
+
 }
 
 // =============================================================================================
@@ -506,9 +517,52 @@ bool showCurrent(DebugSession &s)
 {
     // Read the snapshot at s.currentStep, call printSnapshot, delete the snapshot.
     // If readSnapshotAt returns nullptr, print "damaged .tdbg file" and return false.
+    
+    // session not active
+    if (!s.active_flag){
+        cout <<"No session yet. Use: start <source file>"<<endl;
+        return false;
+    }
+
+    // Snapshot read
+    Snapshot* snap = readSnapshotAt(s.reader, static_cast<int32_t> (s.currentStep));
+    if (snap == nullptr){
+        cout <<"Error: damaged .tdbg file"<<endl;
+        return false;
+    }
+
+    printSnapshot(static_cast<int32_t>(s.currentStep)+1, s.reader.header.stepCount, *snap);
+    delete snap;
+    return true;
+
+
 }
 bool moveBy(DebugSession &s, int32_t delta)
 {
+    // delta means kitna step move krna hai or kis direction ma
+    if (!s.active_flag){
+        cout <<"No session yet. Use: start <source file>"<<endl;
+        return false;
+    }
+
+    int64_t target = s.currentStep + delta;
+    int64_t lastStep = s.reader.header.stepCount - 1;
+
+    if (target < 0 || target > lastStep){
+        cout <<"Cannot move there: you are at step " << s.currentStep + 1 << " of " << s.reader.header.stepCount <<endl;
+        return false;
+
+    }
+
+    int64_t oldStep = s.currentStep;
+    s.currentStep = target;
+
+    // if new snapshot damaged so poorani position wapas set krdo
+    if(!showCurrent(s)){
+        s.currentStep = oldStep;
+        return false;
+    }
+    return true;
 }
 bool cmdStart(DebugSession &s, const string &sourcePath)
 {
@@ -519,11 +573,66 @@ bool cmdStart(DebugSession &s, const string &sourcePath)
     // 4. Only now close the old reader (if s.active), then put the new reader into s,
     //    set s.currentStep = 0 and s.active = true.
     // 5. Show step 1 with showCurrent(s).
+
+    string error;
+    if(!requestDebugFile(sourcePath.c_str(), TEMP_TDBG_FILE, error)){
+        cout <<"Error: " << error << endl;
+        return false;
+    }
+
+    TdbgReader newReader;
+    if(!openTdbg(TEMP_TDBG_FILE, newReader)){
+        cout <<"Error: server sent a damaged .tdbg file" << endl;
+        remove(TEMP_TDBG_FILE);
+        return false;
+    }
+
+    Snapshot* first = readSnapshotAt(newReader, 0);
+    if(first == nullptr){
+        cout <<"Error: server sent a damaged .tdbg file"<<endl;
+        closeTdbg(newReader);
+        remove(TEMP_TDBG_FILE);
+        return false;
+    }
+    delete first;
+
+    // pehla new file ko final naam da ga. Agar fail ho so it means the old session is safe
+    if (rename(TEMP_TDBG_FILE, TDBG_FILE)!=0){
+        cout <<"Error: could not save the download as " << TDBG_FILE << endl;
+        closeTdbg(newReader);
+        remove(TEMP_TDBG_FILE);
+        return false;
+    }
+
+    // now the new file is ready so we can close old reader and use new reader
+    if(s.active_flag){
+        closeTdbg(s.reader);
+    }
+
+    s.reader = newReader;
+    s.currentStep = 0;
+    s.active_flag = 1;
+
+    return showCurrent(s);
 }
-bool cmdNext(DebugSession &s) {}
-bool cmdPrv(DebugSession &s) {}
-bool cmdJmpNext(DebugSession &s, int32_t n) {}
-bool cmdJmpPrv(DebugSession &s, int32_t n) { }
+bool cmdNext(DebugSession &s) { return moveBy(s,1); }
+bool cmdPrv(DebugSession &s) { return moveBy(s, -1); }
+bool cmdJmpNext(DebugSession &s, int32_t n) { 
+    if (n < 1 || n>MAX_JUMP){
+        cout <<"Error: the jump must be a number from 1 to "<< MAX_JUMP << endl;
+        return false;
+    }
+
+    return moveBy(s, n);
+}
+bool cmdJmpPrv(DebugSession &s, int32_t n) {
+    if (n < 1 || n>MAX_JUMP){
+        cout <<"Error: the jump must be a number from 1 to "<< MAX_JUMP << endl;
+        return false;
+    }
+
+    return moveBy(s, -n);
+ }
 
 // =============================================================================================
 // PART E: PRINTING
@@ -531,16 +640,65 @@ bool cmdJmpPrv(DebugSession &s, int32_t n) { }
 
 void printSnapshot(int32_t step, int32_t totalSteps, const Snapshot &s)
 {
+    cout <<"Step " << step << " of " <<totalSteps<<endl;
+    if (s.stackDepth == 0){
+        cout <<" (Program finished, the call stack is empty)" << endl;
+        return;
+    }
+
+    for(int32_t i = s.stackDepth - 1; i>=0; i--){
+        const Frame &fr = s.callStack[i];
+        cout <<" " << fr.func_name << "(";
+        for (int32_t j = 0; j<fr.argc; j++){
+            if(j>0){
+                cout <<", ";
+            }
+
+            cout << fr.argv[j].name <<"=" << fr.argv[j].value;
+        }
+
+        cout <<") locals:";
+        for (int32_t j = 0; j< fr.localCount; j++){
+            cout <<" " << fr.locals[j].name <<"=" << fr.locals[j].value;
+        }
+        cout << endl;
+    }
 }
 void printHelp()
 {
     // Print the commands
+    cout <<"Commands:\n" << " start <source file>\n" <<" next\n"<<" prv\n" <<" jmp next <number>\n" << " jmp prv <number>\n" <<" help\n" <<" quit or exit\n";
 }
 
 // =============================================================================================
 // PART F: THE INFINITE LOOP
 // =============================================================================================
+bool readPositiveNumber(const string &text, int32_t limit, int32_t &number){
+    //check jump and port both
+    if(text.empty()){
+        return false;
+    }
 
+    int64_t value = 0;
+    for(size_t i = 0; i < text.size(); i++){
+        char ch = text[i];
+        if (ch < '0' || ch > '9'){
+            return false;
+        }
+
+        value = value * 10 + (ch - '0');
+        if(value > limit){
+            return false;
+        }
+    }
+
+    if (value == 0){
+        return false;
+    }
+
+    number = static_cast<int32_t> (value);
+    return true;
+}
 bool runCommand(DebugSession &s, const string &line, bool &quitRequested)
 {
     // 1. Split the line into words.
@@ -554,6 +712,81 @@ bool runCommand(DebugSession &s, const string &line, bool &quitRequested)
     //      help       -> printHelp
     //      quit, exit -> set quitRequested = true
     // 4. For anything else, or a wrong number of words, print "unknown command" and the help text, and return false.
+
+   vector<string> words;
+   string word;
+  // if space comes, ju word bana hai usse vector ma daal da ga
+   for (char ch:line){
+    if (ch == ' ' || ch == '\t' || ch== '\r' || ch == '\n' || ch == '\v' || ch == '\f'){
+        if (!word.empty()){
+            words.push_back(word);
+            word.clear();
+        }
+    }else{
+        word = word + ch;
+    }
+
+   }
+   // last word k baad space nahi honi chahiya
+   if(!word.empty()){
+    words.push_back(word);
+   }
+
+   if(words.empty()){
+    return true;
+   }
+
+   // Agar pehla word ttdb hai so actual command agla word hai 
+   // first batata hai command kis index pr hai and count batata hai command k sath kitna or words hai
+   size_t first = 0;
+   if(words[0] == PROGRAM_NAME){
+    first = 1;
+   }
+
+   size_t count = words.size() - first;
+
+   if(count == 1){
+    const string& command = words[first];
+
+    if(command == "next"){
+        return cmdNext(s);
+    }
+
+    if (command == "prv"){
+        return cmdPrv(s);
+    }
+    if(command == "help"){
+        printHelp();
+        return true;
+    }
+    if(command == "quit" || command == "exit"){
+        quitRequested = true;
+        return true;
+    }
+   }else if(count == 2 && words[first] == "start"){
+    return cmdStart(s, words[first+1]);
+   }else if(count == 3 && words[first]=="jmp"){
+    const string& direction = words[first+1];
+
+    if(direction == "next" || direction == "prv"){
+        int32_t n;
+        if(!readPositiveNumber(words[first+2], MAX_JUMP, n)){
+            cout <<"Error: the jump must be a number from 1 to " << MAX_JUMP << endl;
+            return false;
+        }
+
+        if(direction == "next"){
+            return cmdJmpNext(s, n);
+        }
+        return cmdJmpPrv(s, n);
+    }
+   
+   }
+
+   cout <<"Unknown command"<<endl;
+   printHelp();
+   return false;
+
 }
 int main(int argc, char *argv[])
 {
@@ -568,7 +801,44 @@ int main(int argc, char *argv[])
     // After the loop: closeSession(session) and return 0.
     // Never exit the loop because of an error. Only quit or the end of the input leaves it.
 
-    
+    if(argc != 3){
+        cout <<"Usage: " << argv[0] <<" <lb_ip> <lb_port>" << endl;
+        return 1;
+    }
+
+    sockaddr_in address{};
+    if(inet_pton(AF_INET, argv[1], &address.sin_addr)!=1){
+        cout <<"Error: invalid IPv4 address" << endl;
+        return 1;
+    }
+
+    int32_t port;
+    if(!readPositiveNumber(argv[2], 65535, port)){
+        cout <<"Error: port must be a number from 1 to 65535" << endl;
+        return 1;
+    }
+
+    LB_HOST = argv[1];
+    LB_PORT = port;
+
+    DebugSession session;
+    initSession(session);
+
+    cout <<"Time-Travel Debugger" << endl;
+    printHelp();
+
+    bool quitRequested = false;
+    string line;
+
+    while (!quitRequested){
+        cout << PROMPT << flush;
+        if(!getline(cin, line)){
+            break;
+        }
+
+        runCommand(session, line, quitRequested);
+    }
+    closeSession(session);
     return 0;
 }
 

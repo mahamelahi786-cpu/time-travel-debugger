@@ -10,3 +10,4 @@ source.bin
 /test_socket_helper
 /test_crc
 /baseline.tdbg
+client_test

@@ -77,3 +77,10 @@ Completed part E and F which included printHelp, runCommand, main\. Tested comma
 
 ### Next
 - will be starting with load balancer
+
+###10 November - Phase 2 Completion and final work 
+- Implemented the load Balancer cpp to queue the client requests and connect to backend and start when needed along with forward request and responses.
+- Added extra error handling for unavailable backends, failed connection and timeouts and client disconnection. I improved my shutdown handling and handled pending upload data so clients could show error correctly. 
+- Updated client.cpp with a send timeout and validation of downloads snapshot before replacing the existing session. 
+- Finally updated the server.cpp from phase 1 to improve  input validation and handle duplicate functions, invalid operands and arguements, integer overflow and file opening failures. 
+- Recompiled all three programs and tested the complete client-load balancer server flow

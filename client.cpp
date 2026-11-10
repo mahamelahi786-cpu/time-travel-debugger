@@ -84,7 +84,7 @@ struct DebugSession
 {
     int active_flag;     // false until a "start" has worked
     TdbgReader reader;   // the .tdbg file stays open for the whole session
-    int64_t currentStep; 
+    int64_t currentStep;
 };
 
 // =============================================================================================
@@ -114,6 +114,13 @@ int connectToHost(const char *host, int port)
         return -1;
     }
 
+    timeval timeout{};
+    timeout.tv_sec = 30;
+    if(setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) != 0){
+        close(sock);
+        return -1;
+    }
+
     if(connect(sock, (struct sockaddr*)&address, sizeof(address))<0){
         close(sock);
         return -1;
@@ -139,7 +146,7 @@ bool uploadSource(int sock, const char *sourcePath)
         return false;
     }
     size_t bytesRead;
-    
+
     while((bytesRead=fread(buffer,1,sizeof(buffer), file))>0){
         crc = crc_update(crc, buffer, bytesRead);
 
@@ -154,7 +161,7 @@ bool uploadSource(int sock, const char *sourcePath)
         fclose(file);
         return false;
     }
-    
+
     fclose(file);
 
     char trailer[4];
@@ -206,7 +213,7 @@ bool receiveResponse(int sock, const char *outTdbgPath, string &outError)
             }else if(status == -1){
                 outError = "response is missing a status byte";
             }
-    
+
             break;
         }
 
@@ -344,7 +351,7 @@ bool openTdbg(const char *path, TdbgReader &r)
         fclose(file);
         return false;
     }
-    
+
     if (memcmp(header.magic, "TTDB", 4)!=0 || header.version != supportedVersion || header.stepCount <= 0){
         fclose(file);
         return false;
@@ -374,7 +381,7 @@ bool openTdbg(const char *path, TdbgReader &r)
     for (int32_t i=0; i<header.stepCount; i++){
         int64_t offset;
 
-        if(fread(&offset, sizeof(offset), 1, file)!=1 || offset <= previous || offset >= header.indexOffset){
+        if(fread(&offset, sizeof(offset), 1, file)!=1 || (i == 0 && offset != headerSize) || offset <= previous || offset >= header.indexOffset){
             fclose(file);
             return false;
         }
@@ -423,7 +430,7 @@ bool readString(FILE* file, string& text, int64_t end){
 
 bool readVariable(FILE* file, Variable& var, int64_t end){
     return readString(file, var.name, end) && fread(&var.value, sizeof(var.value), 1, file)==1;
- 
+
 }
 
 bool fillSnapshot(FILE* file, Snapshot& snap, int64_t end){
@@ -493,7 +500,7 @@ void initSession(DebugSession &s)
     s.active_flag = 0; // koi session start nahi hua
     s.currentStep = 0; // jab session start hoga, pehla step code ma zero hoga
     s.reader = TdbgReader{}; // blank reader
-   
+
 }
 void closeSession(DebugSession &s)
 {
@@ -517,7 +524,7 @@ bool showCurrent(DebugSession &s)
 {
     // Read the snapshot at s.currentStep, call printSnapshot, delete the snapshot.
     // If readSnapshotAt returns nullptr, print "damaged .tdbg file" and return false.
-    
+
     // session not active
     if (!s.active_flag){
         cout <<"No session yet. Use: start <source file>"<<endl;
@@ -587,14 +594,16 @@ bool cmdStart(DebugSession &s, const string &sourcePath)
         return false;
     }
 
-    Snapshot* first = readSnapshotAt(newReader, 0);
-    if(first == nullptr){
-        cout <<"Error: server sent a damaged .tdbg file"<<endl;
-        closeTdbg(newReader);
-        remove(TEMP_TDBG_FILE);
-        return false;
+    for(int32_t i = 0; i < newReader.header.stepCount; i++){
+        Snapshot* snap = readSnapshotAt(newReader, i);
+        if(snap == nullptr){
+            cout <<"Error: server sent a damaged .tdbg file"<<endl;
+            closeTdbg(newReader);
+            remove(TEMP_TDBG_FILE);
+            return false;
+        }
+        delete snap;
     }
-    delete first;
 
     // pehla new file ko final naam da ga. Agar fail ho so it means the old session is safe
     if (rename(TEMP_TDBG_FILE, TDBG_FILE)!=0){
@@ -617,7 +626,7 @@ bool cmdStart(DebugSession &s, const string &sourcePath)
 }
 bool cmdNext(DebugSession &s) { return moveBy(s,1); }
 bool cmdPrv(DebugSession &s) { return moveBy(s, -1); }
-bool cmdJmpNext(DebugSession &s, int32_t n) { 
+bool cmdJmpNext(DebugSession &s, int32_t n) {
     if (n < 1 || n>MAX_JUMP){
         cout <<"Error: the jump must be a number from 1 to "<< MAX_JUMP << endl;
         return false;
@@ -780,7 +789,7 @@ bool runCommand(DebugSession &s, const string &line, bool &quitRequested)
         }
         return cmdJmpPrv(s, n);
     }
-   
+
    }
 
    cout <<"Unknown command"<<endl;
@@ -839,6 +848,5 @@ int main(int argc, char *argv[])
         runCommand(session, line, quitRequested);
     }
     closeSession(session);
-    return 0;
+    return 0;  
 }
-
